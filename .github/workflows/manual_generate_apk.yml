@@ -1,71 +1,59 @@
-name: Build Android APK
-
+name: Manual Generate Android APK
 on:
   workflow_dispatch:
-    inputs:
-      buildVariant:
-        description: "Pilih varian APK"
-        required: true
-        type: choice
-        default: NormalDebug
-        options:
-          - NormalOptimized
-          - NormalDebug
-          - VROptimized
-          - VRDebug
-          - LegacyOptimized
 
 jobs:
-  build:
-    name: Build ${{ inputs.buildVariant }} APK
+  apk:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Fetch upstream tags if needed
+      - name: Check Valid Version Tags
+        id: valid-tags
         shell: bash
         run: |
-          if [ -z "$(git tag -l 'v[0-9]*')" ]; then
-            git fetch --no-recurse-submodules --tags --force \
-              https://github.com/hrydgard/ppsspp.git || true
-          fi
+          echo "count=$(git tag -l 'v[0-9]*' | wc -l | tr -d ' ')" >> $GITHUB_OUTPUT
 
-      - name: Set up Java
-        uses: actions/setup-java@v6.1.0
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
-      - name: Build APK
-        env:
-          BUILD_VARIANT: ${{ inputs.buildVariant }}
-        run: ./gradlew "assemble${BUILD_VARIANT}" --no-daemon --stacktrace
-
-      - name: Collect APK files
-        shell: bash
+      - name: Fetch upstream tags
+        if: steps.valid-tags.outputs.count == '0'
         run: |
-          mkdir -p dist
-          find android -type f -name "*.apk" -print0 |
-            while IFS= read -r -d '' apk; do
-              relative_path="${apk#android/}"
-              mkdir -p "dist/$(dirname "$relative_path")"
-              cp "$apk" "dist/$relative_path"
-            done
+          git remote add upstream https://github.com/hrydgard/ppsspp.git
+          git fetch --deepen=15000 --no-recurse-submodules --tags --force upstream || exit 0
 
-          if [ -z "$(find dist -type f -name '*.apk' -print -quit)" ]; then
-            echo "APK tidak ditemukan setelah build."
-            exit 1
-          fi
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v7
+      - name: Setup JDK
+        uses: actions/setup-java@v4
         with:
-          name: android-${{ inputs.buildVariant }}
-          path: dist/
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Build Single Android APK
+        run: |
+          ./gradlew :android:assembleNormalOptimized \
+            -Pandroid.injected.build.abi.arm64-v8a \
+            --parallel \
+            --build-cache \
+            --no-daemon \
+            -x test \
+            -x lint
+
+      - name: Package Build Output
+        run: |
+          mkdir -p ppsspp
+          find android/build/outputs/apk -name "*.apk" -type f -exec cp {} ppsspp/ \;
+          echo "APK packaged:"
+          ls -lh ppsspp/
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppsspp-android-arm64
+          path: ppsspp/
+          retention-days: 30
           if-no-files-found: error
