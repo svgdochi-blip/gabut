@@ -50,6 +50,7 @@ list(APPEND UISource
 	IAPScreen.cpp
 	IAPScreen.h
 	MainScreen.h
+	MemScanScreen.cpp
 	MainScreen.cpp
 	GameBrowser.h
 	GameBrowser.cpp
