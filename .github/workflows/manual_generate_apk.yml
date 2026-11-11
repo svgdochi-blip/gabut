@@ -1,81 +1,71 @@
-name: Manual Generate Android APK
+name: Build Android APK
+
 on:
   workflow_dispatch:
     inputs:
-
       buildVariant:
-        type: choice
-        description: 'Build Variant'
+        description: "Pilih varian APK"
         required: true
-        default: 'NormalOptimized'
-        options: 
-        - NormalOptimized
-        - NormalDebug
-        - VROptimized
-        - VRDebug
-        - LegacyOptimized
+        type: choice
+        default: NormalDebug
+        options:
+          - NormalOptimized
+          - NormalDebug
+          - VROptimized
+          - VRDebug
+          - LegacyOptimized
 
 jobs:
-
-  apk:
-    name: Generate ${{ github.event.inputs.buildVariant }} APK
+  build:
+    name: Build ${{ inputs.buildVariant }} APK
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Check Valid Version Tags
-        id: valid-tags
+      - name: Fetch upstream tags if needed
         shell: bash
         run: |
-          echo "count=$(git tag -l 'v[0-9]*' | wc -l | tr -d ' ')" >> $GITHUB_OUTPUT
-
-      - name: Fetch upstream tags # required for git describe to return a valid version and to preevnt androidGitVersion from crashing on a new fork
-        if: steps.valid-tags.outputs.count == '0'
-        run: |
-          # TODO: should try to fetch tags from whereever this repo was forked from before fetching from official repo
-          git remote add upstream https://github.com/hrydgard/ppsspp.git # fetching from official repo as a fallback
-          git fetch --deepen=15000 --no-recurse-submodules --tags --force upstream || exit 0
-        
-      - name: Setup JDK
-        uses: actions/setup-java@v6.1.0
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'gradle'
-        
-      #- name: Setup SDK # gradlew will install SDK automatically, thus this step not needed
-      #  uses: android-actions/setup-android@v3
-          
-      #- name: Setup NDK # gradle will install NDK (side by side) automatically, thus explictly seting up NDK here will cause not enough storage issue when building debug variant
-      #  uses: nttld/setup-ndk@v1
-      #  with:
-      #    ndk-version: r21e
-
-      - name: Test androidGitVersion
-        run: |
-          echo "count=${{steps.valid-tags.outputs.count}}"
-          gradle --quiet androidGitVersion
-      
-      - name: Assemble APK
-        run: ./gradlew assemble${{ github.event.inputs.buildVariant }} --stacktrace
-      
-      #- name: Gradle Test
-      #  run: bash ./gradlew test${{ github.event.inputs.buildVariant }}UnitTest --stacktrace
-      
-      - name: Package build
-        run: |
-          find . -name "*.apk"
-          mkdir ppsspp
-          if [ -e android/build/*/apk/*/*/*.apk ]; then
-            cp android/build/*/apk/*/*/*.apk ppsspp/
+          if [ -z "$(git tag -l 'v[0-9]*')" ]; then
+            git fetch --no-recurse-submodules --tags --force \
+              https://github.com/hrydgard/ppsspp.git || true
           fi
 
-      - name: Upload artifact
+      - name: Set up Java
+        uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Build APK
+        env:
+          BUILD_VARIANT: ${{ inputs.buildVariant }}
+        run: ./gradlew "assemble${BUILD_VARIANT}" --no-daemon --stacktrace
+
+      - name: Collect APK files
+        shell: bash
+        run: |
+          mkdir -p dist
+          find android -type f -name "*.apk" -print0 |
+            while IFS= read -r -d '' apk; do
+              relative_path="${apk#android/}"
+              mkdir -p "dist/$(dirname "$relative_path")"
+              cp "$apk" "dist/$relative_path"
+            done
+
+          if [ -z "$(find dist -type f -name '*.apk' -print -quit)" ]; then
+            echo "APK tidak ditemukan setelah build."
+            exit 1
+          fi
+
+      - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: android-${{ github.event.inputs.buildVariant }} build
-          path: ppsspp/
+          name: android-${{ inputs.buildVariant }}
+          path: dist/
+          if-no-files-found: error
