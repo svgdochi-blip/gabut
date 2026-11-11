@@ -113,7 +113,7 @@ protected:
 	void FlushCheatInfo();
 	void AddError(const std::string &msg, int lineNumber);
 	void ParseLine(const std::string &line, int lineNumber);
-	void ParseDataLine(const std::string &line, int lineNumber, CheatCodeFormat format);
+	void ParseDataLine(const std::string &line, int lineNumber);
 	bool ValidateGameID(std::string_view gameID);
 
 	FILE *fp_ = nullptr;
